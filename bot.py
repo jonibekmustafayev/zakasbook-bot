@@ -19,8 +19,8 @@ from aiogram.fsm.context import FSMContext
 # =========================
 # SOZLAMALAR
 # =========================
-TOKEN = "BU_YERGA_BOT_TOKEN"
-ADMIN_ID = 123456789  # o'zingning Telegram ID'ing
+TOKEN = "8574924900:AAHou0j8Rz0vm2xrmGTxkBZ8jQD5czoZmZM"
+ADMIN_ID = 6722242402  # o'zingning Telegram ID'ing
 
 # To'lov linklari (o'zingnikiga almashtir)
 CLICK_URL = "https://my.click.uz/"
