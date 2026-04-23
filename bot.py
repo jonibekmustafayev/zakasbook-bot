@@ -893,7 +893,7 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
         f"✍️ Muallif: {book['author']}\n"
         f"💰 Narx: <b>{book['price']:,} so'm</b>\n"
         f"💳 To'lov: <b>{payment_method}</b>\n"
-        f"{'✅ Chek yuborildi' if has_check else '💵 Naqd to\'lov'}\n"
+        f"{'✅ Chek yuborildi' if has_check else '💵 Naqd tolov'}\n"
         f"━━━━━━━━━━━━━━━━\n"
         f"🕒 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     ).replace(",", " ")
