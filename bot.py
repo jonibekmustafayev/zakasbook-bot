@@ -889,7 +889,7 @@ async def book_detail_cb(callback: CallbackQuery):
         f"✍️ Muallif: {b['author']}\n"
         f"💰 Narx: <b>{fmt(b['price'])} so'm</b>\n"
         f"{rating_txt} | 🛒 {sold} ta sotilgan\n\n"
-        f"📝 {b.get('description') or 'Tavsif yo\'q'}"
+        f"📝 {b.get('description') or 'Tavsif yoq'}"
     )
     kb = book_detail_keyboard(bid, callback.from_user.id)
     try:
