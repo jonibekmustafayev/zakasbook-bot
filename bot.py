@@ -608,9 +608,6 @@ async def start_handler(message: Message, state: FSMContext):
     await message.answer(
         f"Assalomu alaykum, <b>{name}</b>! 👋\n\n"
         "📚 <b>Kitob do'konimizga xush kelibsiz!</b>\n\n"
-        "✅ Bir vaqtda ko'p kitob buyurtma qiling\n"
-        "📍 GPS orqali manzilni avtomatik yuboring\n"
-        "📱 Kontaktni bir tugma bilan ulashing\n"
         "❤️ Sevimli kitoblarni Wishlistga qo'shing\n"
         "🎟️ Promo kod bilan chegirma oling\n"
         "⭐ Kitoblarga baho bering\n\n"
