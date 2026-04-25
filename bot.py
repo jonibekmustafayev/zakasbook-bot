@@ -1,9 +1,9 @@
 """
 ╔══════════════════════════════════════════════════════════╗
-║           KITOB DO'KONI TELEGRAM BOT  v3.1              ║
+║           KITOB DO'KONI TELEGRAM BOT  v3.2              ║
 ║  Parallel foydalanuvchilar, anti-flood, wishlist,        ║
 ║  promo kod, buyurtma kuzatuv, karta egasi ismi va boshq. ║
-║  + Joylashuv ruxsati oqimi (v3.1)                       ║
+║  + Avtomatik lokatsiya (v3.2)                           ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -81,9 +81,7 @@ _blocked_users: dict = {}
 class OrderState(StatesGroup):
     waiting_full_name  = State()
     waiting_phone      = State()
-    waiting_address    = State()
-    # ↓ YANGI: joylashuv ruxsati so'raldi, tugma bosilishini kutmoqda
-    waiting_location_permission = State()
+    waiting_address    = State()   # manzil tanlash ekrani (GPS yoki qo'lda)
     waiting_promo      = State()
     waiting_payment    = State()
     waiting_check      = State()
@@ -283,26 +281,17 @@ def phone_keyboard() -> ReplyKeyboardMarkup:
     ], resize_keyboard=True, one_time_keyboard=True)
 
 # ════════════════════════════════════════════════════
-#  YANGI: Manzil tanlash klaviaturasi (location YO'Q)
+#  v3.2: Manzil klaviaturasi — request_location=True
+#  birinchi bosqichdayoq, ruxsat oqimi YO'Q
 # ════════════════════════════════════════════════════
 def address_choose_keyboard() -> ReplyKeyboardMarkup:
     """
-    Birinchi qadam: foydalanuvchi GPS yoki qo'lda yozishni tanlaydi.
-    GPS tugmasi hali location so'RAMAYDI — avval ruxsat oqimi ishga tushadi.
+    Foydalanuvchi manzilni GPS yoki qo'lda yozish orqali beradi.
+    request_location=True — Telegram qurilma joylashuvini AVTOMATIK so'raydi.
+    Alohida ruxsat ekrani kerak emas.
     """
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📍 GPS joylashuvimni ulashish")],   # ← request_location YO'Q
-        [KeyboardButton(text="✍️ Manzilni qo'lda yozish")],
-        [KeyboardButton(text="❌ Bekor qilish")],
-    ], resize_keyboard=True, one_time_keyboard=True)
-
-def location_permission_keyboard() -> ReplyKeyboardMarkup:
-    """
-    Ikkinchi qadam: foydalanuvchi joylashuvni yoqib, REAL tugmani bosadi.
-    Bu yerda request_location=True ishlatiladi.
-    """
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📡 Joylashuvni yuborish", request_location=True)],
+        [KeyboardButton(text="📍 Joylashuvimni yuborish", request_location=True)],
         [KeyboardButton(text="✍️ Manzilni qo'lda yozish")],
         [KeyboardButton(text="❌ Bekor qilish")],
     ], resize_keyboard=True, one_time_keyboard=True)
@@ -316,6 +305,16 @@ cancel_keyboard = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Bekor qilish")]],
     resize_keyboard=True,
 )
+
+# ════════════════════════════════════════════════════
+#  v3.2: Promo ekrani — "O'tkazib yuborish" TUGMASI
+# ════════════════════════════════════════════════════
+def promo_keyboard() -> ReplyKeyboardMarkup:
+    """Promo kod kiritish yoki o'tkazib yuborish tugmasi."""
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="⏭️ O'tkazib yuborish")],
+        [KeyboardButton(text="❌ Bekor qilish")],
+    ], resize_keyboard=True, one_time_keyboard=True)
 
 def books_keyboard(page: int = 0, source: list = None) -> InlineKeyboardMarkup:
     src = source if source is not None else list(BOOKS.keys())
@@ -1083,8 +1082,10 @@ async def get_contact(message: Message, state: FSMContext):
     await state.set_state(OrderState.waiting_address)
     await message.answer(
         f"✅ Telefon: <b>{phone}</b>\n\n"
-        "3️⃣ Yetkazib berish manzilini tanlang:",
-        reply_markup=address_choose_keyboard(),   # ← yangi klaviatura
+        "3️⃣ Yetkazib berish manzilini tanlang:\n\n"
+        "📍 Tugmani bosing — Telegram qurilmangiz joylashuvini <b>avtomatik</b> aniqlaydi\n"
+        "✍️ Yoki manzilni qo'lda yozing",
+        reply_markup=address_choose_keyboard(),
         parse_mode="HTML",
     )
 
@@ -1111,88 +1112,45 @@ async def get_phone_text(message: Message, state: FSMContext):
     await state.set_state(OrderState.waiting_address)
     await message.answer(
         f"✅ Telefon: <b>{phone}</b>\n\n"
-        "3️⃣ Yetkazib berish manzilini tanlang:",
-        reply_markup=address_choose_keyboard(),   # ← yangi klaviatura
+        "3️⃣ Yetkazib berish manzilini tanlang:\n\n"
+        "📍 Tugmani bosing — Telegram qurilmangiz joylashuvini <b>avtomatik</b> aniqlaydi\n"
+        "✍️ Yoki manzilni qo'lda yozing",
+        reply_markup=address_choose_keyboard(),
         parse_mode="HTML",
     )
 
 
 # ══════════════════════════════════════════════════════════════
-#  FSM — MANZIL: BIRINCHI QADAM (foydalanuvchi GPS/qo'lda tanlaydi)
+#  FSM — MANZIL: GPS (avtomatik, bitta tugmada)
 # ══════════════════════════════════════════════════════════════
-@dp.message(OrderState.waiting_address, F.text == "📍 GPS joylashuvimni ulashish")
-async def address_gps_chosen(message: Message, state: FSMContext):
+@dp.message(OrderState.waiting_address, F.location)
+async def get_location(message: Message, state: FSMContext):
     """
-    Foydalanuvchi GPS tugmasini bosdi.
-    Endi unga Telegram'da joylashuvni YOQISH va YUBORISH ko'rsatmasi beriladi.
-    request_location=True bo'lgan YANGI tugma chiqadi.
+    Foydalanuvchi 📍 Joylashuvimni yuborish tugmasini bosdi.
+    Telegram qurilmadan GPS koordinatlarini avtomatik oladi.
     """
-    await state.set_state(OrderState.waiting_location_permission)
-    await message.answer(
-        "📍 <b>Joylashuvni yoqing va yuboring</b>\n\n"
-        "Quyidagi yo'riqnomani bajaring:\n\n"
-        "1️⃣ <b>Telegram Sozlamalar</b> → <b>Maxfiylik</b> → <b>Joylashuv</b>\n"
-        "   — yoki —\n"
-        "   Telefon <b>Sozlamalar</b> → <b>Ilovalar</b> → <b>Telegram</b> → <b>Joylashuv: Faqat ilovadan foydalanayotganda</b>\n\n"
-        "2️⃣ Ruxsat berganingizdan so'ng quyidagi\n"
-        "   <b>📡 Joylashuvni yuborish</b> tugmasini bosing 👇",
-        reply_markup=location_permission_keyboard(),   # ← request_location=True bu yerda
-        parse_mode="HTML",
-    )
-
-
-@dp.message(OrderState.waiting_location_permission, F.location)
-async def get_location_after_permission(message: Message, state: FSMContext):
-    """Foydalanuvchi ruxsat berib lokatsiyani yubordi."""
     lat = message.location.latitude
     lon = message.location.longitude
     maps = f"https://maps.google.com/?q={lat},{lon}"
     await state.update_data(
         address=f"📍 GPS: {lat:.5f}, {lon:.5f}\n🔗 {maps}",
-        lat=lat, lon=lon,
+        lat=lat,
+        lon=lon,
     )
     await state.set_state(OrderState.waiting_promo)
     await message.answer(
         f"✅ <b>Joylashuv qabul qilindi!</b>\n"
         f"📍 <a href='{maps}'>Xaritada ko'rish</a>\n\n"
         "4️⃣ 🎟️ Promo kodingiz bormi?\n"
-        "Kod yozing yoki <b>O'tkazib yuborish</b> deb yozing:",
-        reply_markup=cancel_keyboard,
+        "Kod yozing yoki <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
+        reply_markup=promo_keyboard(),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
 
 
-@dp.message(OrderState.waiting_location_permission, F.text == "✍️ Manzilni qo'lda yozish")
-async def address_manual_from_permission(message: Message, state: FSMContext):
-    """Ruxsat ekranida 'qo'lda yozish' tugmasini bosdi."""
-    await state.set_state(OrderState.waiting_address)
-    await message.answer(
-        "🏠 Shahar, tuman, ko'cha, uy raqamini yozing:",
-        reply_markup=cancel_keyboard,
-    )
-
-
-@dp.message(OrderState.waiting_location_permission, F.text == "❌ Bekor qilish")
-async def cancel_from_permission(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Bekor qilindi.", reply_markup=get_main_menu(message.from_user.id))
-
-
-@dp.message(OrderState.waiting_location_permission)
-async def location_permission_fallback(message: Message, state: FSMContext):
-    """Foydalanuvchi boshqa narsa yubordi — eslatma ber."""
-    await message.answer(
-        "⚠️ Iltimos, joylashuvingizni yuboring yoki manzilni qo'lda yozing.\n\n"
-        "Joylashuv ruxsatini berganingizdan so'ng\n"
-        "<b>📡 Joylashuvni yuborish</b> tugmasini bosing 👇",
-        reply_markup=location_permission_keyboard(),
-        parse_mode="HTML",
-    )
-
-
 # ══════════════════════════════════════════════════════════════
-#  FSM — MANZIL: QO'LDA YOZISH (waiting_address holati)
+#  FSM — MANZIL: QO'LDA YOZISH
 # ══════════════════════════════════════════════════════════════
 @dp.message(OrderState.waiting_address, F.text == "✍️ Manzilni qo'lda yozish")
 async def address_manual(message: Message):
@@ -1221,14 +1179,15 @@ async def get_address_text(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Manzil: <b>{addr}</b>\n\n"
         "4️⃣ 🎟️ Promo kodingiz bormi?\n"
-        "Kod yozing yoki <b>O'tkazib yuborish</b> deb yozing:",
-        reply_markup=cancel_keyboard,
+        "Kod yozing yoki <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
+        reply_markup=promo_keyboard(),
         parse_mode="HTML",
     )
 
 
 # ═══════════════════════════════════════════════════
 #  FSM — PROMO KOD
+#  ⏭️ O'tkazib yuborish TUGMASI bilan ishlaydi
 # ═══════════════════════════════════════════════════
 @dp.message(OrderState.waiting_promo)
 async def get_promo(message: Message, state: FSMContext):
@@ -1240,7 +1199,9 @@ async def get_promo(message: Message, state: FSMContext):
     promo_code = ""
     promo_desc = ""
 
-    if message.text.strip().lower() != "o'tkazib yuborish":
+    # ⏭️ tugmasi yoki eski matn usuli — ikkalasi ham qabul qilinadi
+    skip_texts = {"⏭️ O'tkazib yuborish", "o'tkazib yuborish", "otkazib yuborish", "-"}
+    if message.text.strip().lower() not in {t.lower() for t in skip_texts}:
         code = message.text.strip().upper()
         data = await state.get_data()
         uid  = message.from_user.id
@@ -1936,8 +1897,8 @@ async def fallback(message: Message, state: FSMContext):
 # ═══════════════════════════════════════════════════
 async def main():
     await init_db()
-    logger.info("✅ Bot v3.1 ishga tushdi!")
-    print("✅ Bot v3.1 ishga tushdi! Ctrl+C bosib to'xtating.")
+    logger.info("✅ Bot v3.2 ishga tushdi!")
+    print("✅ Bot v3.2 ishga tushdi! Ctrl+C bosib to'xtating.")
     await dp.start_polling(
         bot,
         allowed_updates=dp.resolve_used_update_types(),
