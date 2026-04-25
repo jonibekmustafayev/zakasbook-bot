@@ -1201,8 +1201,8 @@ async def get_promo(message: Message, state: FSMContext):
 
     # ⏭️ tugmasi yoki eski matn usuli — ikkalasi ham qabul qilinadi
     skip_keyboard = {"⏭️ O'tkazib yuborish", "o'tkazib yuborish", "otkazib yuborish", "-"}
-    if message.keyboard.strip().lower() not in {t.lower() for t in skip_keyboards}:
-        code = message.keyboard.strip().upper()
+    if message.keyboard.strip().lower() not in {t.lower() for t in skip_texts}:
+        code = message.text.strip().upper()
         data = await state.get_data()
         uid  = message.from_user.id
 
