@@ -1,9 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════╗
-║           KITOB DO'KONI TELEGRAM BOT  v3.2              ║
-║  Parallel foydalanuvchilar, anti-flood, wishlist,        ║
-║  promo kod, buyurtma kuzatuv, karta egasi ismi va boshq. ║
-║  + Avtomatik lokatsiya (v3.2)                           ║
+║           KITOB DO'KONI TELEGRAM BOT  v4.0              ║
+║  ✅ O'tkazib yuborish — FAQAT TUGMA (matn emas)         ║
+║  ✅ Joylashuv — faqat tugma orqali, qurilma yoqish xabar║
+║  ✅ Bir kitobdan bir nechta nusxa (savat orqali)         ║
+║  ✅ Kitoblar saqlanadi (DB dan yuklanadi)                ║
+║  ✅ Qo'shimcha yaxshilanishlar v4.0                     ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -11,10 +13,8 @@ import asyncio
 import aiosqlite
 import re
 import logging
-import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from collections import defaultdict
-from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.filters import Command, CommandStart
@@ -49,17 +49,15 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════
 #  SOZLAMALAR
 # ═══════════════════════════════════════════════════
-TOKEN        = "8574924900:AAHou0j8Rz0vm2xrmGTxkBZ8jQD5czoZmZM"
-ADMIN_ID     = 6722242402
+TOKEN          = "8574924900:AAHou0j8Rz0vm2xrmGTxkBZ8jQD5czoZmZM"
+ADMIN_ID       = 6722242402
 ADMIN_USERNAME = "@admoyin_lvl"
-ADMIN_PHONE  = "+998931407381"
+ADMIN_PHONE    = "+998931407381"
 
-# ── To'lov rekvizitlari ──────────────────────────────
-CARD_HOLDER  = "Mustafayev Jonibek"
-HUMO_CARD    = "9860 1701 3065 6763"
-VISA_CARD    = "4023 0602 0575 2529"
+CARD_HOLDER = "Mustafayev Jonibek"
+HUMO_CARD   = "9860 1701 3065 6763"
+VISA_CARD   = "4023 0602 0575 2529"
 
-# ── Anti-flood sozlamalari ───────────────────────────
 FLOOD_LIMIT      = 5
 FLOOD_INTERVAL   = 3
 FLOOD_BLOCK_TIME = 30
@@ -67,9 +65,9 @@ FLOOD_BLOCK_TIME = 30
 # ═══════════════════════════════════════════════════
 #  GLOBAL MA'LUMOTLAR
 # ═══════════════════════════════════════════════════
-BOOKS: dict  = {}
-CARTS: dict  = {}
-WISHLISTS: dict = {}
+BOOKS: dict      = {}
+CARTS: dict      = {}
+WISHLISTS: dict  = {}
 PROMO_CODES: dict = {}
 
 _flood_tracker: dict = defaultdict(list)
@@ -79,12 +77,12 @@ _blocked_users: dict = {}
 #  FSM HOLATLAR
 # ═══════════════════════════════════════════════════
 class OrderState(StatesGroup):
-    waiting_full_name  = State()
-    waiting_phone      = State()
-    waiting_address    = State()   # manzil tanlash ekrani (GPS yoki qo'lda)
-    waiting_promo      = State()
-    waiting_payment    = State()
-    waiting_check      = State()
+    waiting_full_name = State()
+    waiting_phone     = State()
+    waiting_address   = State()
+    waiting_promo     = State()
+    waiting_payment   = State()
+    waiting_check     = State()
 
 class AddBookState(StatesGroup):
     waiting_book_name        = State()
@@ -92,10 +90,6 @@ class AddBookState(StatesGroup):
     waiting_book_price       = State()
     waiting_book_description = State()
     waiting_book_photo       = State()
-
-class EditBookState(StatesGroup):
-    choosing_field = State()
-    waiting_value  = State()
 
 class SearchState(StatesGroup):
     waiting_search_query = State()
@@ -107,10 +101,10 @@ class FeedbackState(StatesGroup):
     waiting_feedback = State()
 
 class PromoState(StatesGroup):
-    waiting_code        = State()
-    waiting_discount    = State()
-    waiting_type        = State()
-    waiting_max_uses    = State()
+    waiting_code     = State()
+    waiting_discount = State()
+    waiting_type     = State()
+    waiting_max_uses = State()
 
 # ═══════════════════════════════════════════════════
 #  ANTI-FLOOD MIDDLEWARE
@@ -215,7 +209,7 @@ def cart_count(uid: int) -> int:
 def get_wishlist(uid: int) -> set:
     return WISHLISTS.get(uid, set())
 
-def apply_promo(total: int, code: str) -> tuple[int, str]:
+def apply_promo(total: int, code: str) -> tuple:
     code = code.strip().upper()
     if code not in PROMO_CODES:
         return total, ""
@@ -234,14 +228,16 @@ def apply_promo(total: int, code: str) -> tuple[int, str]:
     return new, desc
 
 def format_order_row(row) -> str:
-    emoji = {"yangi":"🆕","tasdiqlandi":"✅","yuborildi":"🚚","bekor qilindi":"❌"}.get(row[10],"📌")
+    # row[10] = status indeksi
+    status_col = row[10] if len(row) > 10 else "yangi"
+    emoji = {"yangi": "🆕", "tasdiqlandi": "✅", "yuborildi": "🚚", "bekor qilindi": "❌"}.get(status_col, "📌")
     return (
         f"━━━━━━━━━━━━━━━━\n"
         f"🧾 Buyurtma #{row[0]}\n"
-        f"📖 {row[8]}\n"
-        f"💰 {fmt(row[9])} so'm\n"
-        f"{emoji} {row[10]}\n"
-        f"🕒 {row[11]}\n"
+        f"📖 {row[9]}\n"
+        f"💰 {fmt(row[11])} so'm\n"
+        f"{emoji} {status_col}\n"
+        f"🕒 {row[15]}\n"
         f"━━━━━━━━━━━━━━━━"
     )
 
@@ -253,21 +249,21 @@ def main_menu_keyboard(uid: int) -> ReplyKeyboardMarkup:
     wl   = len(get_wishlist(uid))
     cart = cart_count(uid)
     cart_txt = f"🛒 Savatcha ({cart})" if cart else "🛒 Savatcha"
-    wl_txt   = f"❤️ Wishlist ({wl})"  if wl   else "❤️ Wishlist"
+    wl_txt   = f"❤️ Wishlist ({wl})"   if wl   else "❤️ Wishlist"
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📚 Kitoblar"),    KeyboardButton(text="🔍 Qidirish")],
-        [KeyboardButton(text=cart_txt),          KeyboardButton(text=wl_txt)],
-        [KeyboardButton(text="📦 Buyurtmalarim"),KeyboardButton(text="💬 Fikr")],
-        [KeyboardButton(text="🎟️ Promo kod"),   KeyboardButton(text="ℹ️ Aloqa")],
+        [KeyboardButton(text="📚 Kitoblar"),     KeyboardButton(text="🔍 Qidirish")],
+        [KeyboardButton(text=cart_txt),           KeyboardButton(text=wl_txt)],
+        [KeyboardButton(text="📦 Buyurtmalarim"), KeyboardButton(text="💬 Fikr")],
+        [KeyboardButton(text="🎟️ Promo kod"),    KeyboardButton(text="ℹ️ Aloqa")],
     ], resize_keyboard=True)
 
 def admin_menu_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📚 Kitoblar"),         KeyboardButton(text="🔍 Qidirish")],
-        [KeyboardButton(text="🛒 Savatcha"),          KeyboardButton(text="📦 Buyurtmalarim")],
-        [KeyboardButton(text="➕ Kitob qo'shish"),    KeyboardButton(text="📋 Kitoblar (Admin)")],
-        [KeyboardButton(text="📊 Admin panel"),       KeyboardButton(text="📣 Xabar yuborish")],
-        [KeyboardButton(text="🎟️ Promo yaratish"),   KeyboardButton(text="📑 Promolar")],
+        [KeyboardButton(text="📚 Kitoblar"),          KeyboardButton(text="🔍 Qidirish")],
+        [KeyboardButton(text="🛒 Savatcha"),           KeyboardButton(text="📦 Buyurtmalarim")],
+        [KeyboardButton(text="➕ Kitob qo'shish"),     KeyboardButton(text="📋 Kitoblar (Admin)")],
+        [KeyboardButton(text="📊 Admin panel"),        KeyboardButton(text="📣 Xabar yuborish")],
+        [KeyboardButton(text="🎟️ Promo yaratish"),    KeyboardButton(text="📑 Promolar")],
     ], resize_keyboard=True)
 
 def get_main_menu(uid: int) -> ReplyKeyboardMarkup:
@@ -280,15 +276,10 @@ def phone_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="❌ Bekor qilish")],
     ], resize_keyboard=True, one_time_keyboard=True)
 
-# ════════════════════════════════════════════════════
-#  v3.2: Manzil klaviaturasi — request_location=True
-#  birinchi bosqichdayoq, ruxsat oqimi YO'Q
-# ════════════════════════════════════════════════════
-def address_choose_keyboard() -> ReplyKeyboardMarkup:
+def address_keyboard() -> ReplyKeyboardMarkup:
     """
-    Foydalanuvchi manzilni GPS yoki qo'lda yozish orqali beradi.
-    request_location=True — Telegram qurilma joylashuvini AVTOMATIK so'raydi.
-    Alohida ruxsat ekrani kerak emas.
+    GPS joylashuv: request_location=True — Telegram avtomatik so'raydi.
+    Qo'lda yozish ham mumkin.
     """
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="📍 Joylashuvimni yuborish", request_location=True)],
@@ -306,25 +297,31 @@ cancel_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-# ════════════════════════════════════════════════════
-#  v3.2: Promo ekrani — "O'tkazib yuborish" TUGMASI
-# ════════════════════════════════════════════════════
-def promo_keyboard() -> ReplyKeyboardMarkup:
-    """Promo kod kiritish yoki o'tkazib yuborish tugmasi."""
+def promo_skip_keyboard() -> ReplyKeyboardMarkup:
+    """Promo ekranda FAQAT tugma — matn yozish kerak emas."""
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="⏭️ O'tkazib yuborish")],
+        [KeyboardButton(text="❌ Bekor qilish")],
+    ], resize_keyboard=True, one_time_keyboard=True)
+
+def photo_skip_keyboard() -> ReplyKeyboardMarkup:
+    """Rasm yuklash ekranida o'tkazib yuborish."""
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="⏭️ O'tkazib yuborish")],
         [KeyboardButton(text="❌ Bekor qilish")],
     ], resize_keyboard=True, one_time_keyboard=True)
 
 def books_keyboard(page: int = 0, source: list = None) -> InlineKeyboardMarkup:
-    src = source if source is not None else list(BOOKS.keys())
-    ps, start, end = 5, page * 5, page * 5 + 5
-    rows = []
+    src   = source if source is not None else list(BOOKS.keys())
+    ps    = 5
+    start = page * ps
+    end   = start + ps
+    rows  = []
     for bid in src[start:end]:
         if bid not in BOOKS:
             continue
-        b = BOOKS[bid]
-        avg  = b.get("avg_rating", 0)
+        b   = BOOKS[bid]
+        avg = b.get("avg_rating", 0)
         star = ("⭐" * round(avg)) if avg >= 1 else ""
         rows.append([InlineKeyboardButton(
             text=f"📖 {b['name']} — {fmt(b['price'])} so'm {star}",
@@ -342,10 +339,15 @@ def books_keyboard(page: int = 0, source: list = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def book_detail_keyboard(bid: str, uid: int) -> InlineKeyboardMarkup:
+    """
+    Savatdagi miqdor ko'rsatiladi.
+    ➕/➖ tugmalar orqali miqdor o'zgartiriladi.
+    """
     cart = get_cart(uid)
     qty  = cart.get(bid, 0)
     wl   = get_wishlist(uid)
     rows = []
+
     if qty > 0:
         rows.append([
             InlineKeyboardButton(text="➖", callback_data=f"cart_remove:{bid}"),
@@ -353,9 +355,11 @@ def book_detail_keyboard(bid: str, uid: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="➕", callback_data=f"cart_add:{bid}"),
         ])
         rows.append([InlineKeyboardButton(text="📦 Savatni ko'rish", callback_data="view_cart")])
+        rows.append([InlineKeyboardButton(text="⚡ Hoziroq buyurtma", callback_data=f"order_now:{bid}")])
     else:
         rows.append([InlineKeyboardButton(text="🛒 Savatga qo'shish", callback_data=f"cart_add:{bid}")])
-        rows.append([InlineKeyboardButton(text="⚡ Hoziroq buyurtma",  callback_data=f"order:{bid}")])
+        rows.append([InlineKeyboardButton(text="⚡ Hoziroq buyurtma",  callback_data=f"order_now:{bid}")])
+
     wl_text = "💔 Wishlistdan chiqarish" if bid in wl else "❤️ Wishlistga qo'shish"
     rows.append([InlineKeyboardButton(text=wl_text, callback_data=f"wl_toggle:{bid}")])
     rows.append([InlineKeyboardButton(text="⭐ Baholash", callback_data=f"rate:{bid}")])
@@ -377,21 +381,21 @@ def cart_keyboard(uid: int) -> InlineKeyboardMarkup:
         b = BOOKS[bid]
         rows.append([
             InlineKeyboardButton(text="➖", callback_data=f"cart_remove:{bid}"),
-            InlineKeyboardButton(text=f"📖 {b['name'][:18]} ×{qty}", callback_data=f"book:{bid}"),
+            InlineKeyboardButton(text=f"📖 {b['name'][:16]} ×{qty}", callback_data=f"book:{bid}"),
             InlineKeyboardButton(text="➕", callback_data=f"cart_add:{bid}"),
         ])
     if rows:
-        rows.append([InlineKeyboardButton(text="🗑️ Tozalash",      callback_data="cart_clear")])
+        rows.append([InlineKeyboardButton(text="🗑️ Tozalash",       callback_data="cart_clear")])
         rows.append([InlineKeyboardButton(text="📦 Buyurtma berish", callback_data="order_cart")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_order_keyboard(order_id: int, uid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Tasdiqlash",  callback_data=f"admin_confirm:{order_id}:{uid}"),
-            InlineKeyboardButton(text="🚚 Yuborildi",   callback_data=f"admin_sent:{order_id}:{uid}"),
+            InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_confirm:{order_id}:{uid}"),
+            InlineKeyboardButton(text="🚚 Yuborildi",  callback_data=f"admin_sent:{order_id}:{uid}"),
         ],
-        [InlineKeyboardButton(text="❌ Bekor qilish",   callback_data=f"admin_cancel:{order_id}:{uid}")],
+        [InlineKeyboardButton(text="❌ Bekor qilish",  callback_data=f"admin_cancel:{order_id}:{uid}")],
     ])
 
 def promo_type_keyboard() -> ReplyKeyboardMarkup:
@@ -411,34 +415,35 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript("""
             CREATE TABLE IF NOT EXISTS books (
-                id          TEXT PRIMARY KEY,
-                name        TEXT NOT NULL,
-                author      TEXT NOT NULL,
-                price       INTEGER NOT NULL,
-                description TEXT,
-                photo       TEXT,
-                avg_rating  REAL    DEFAULT 0,
+                id           TEXT    PRIMARY KEY,
+                name         TEXT    NOT NULL,
+                author       TEXT    NOT NULL,
+                price        INTEGER NOT NULL,
+                description  TEXT,
+                photo        TEXT,
+                avg_rating   REAL    DEFAULT 0,
                 rating_count INTEGER DEFAULT 0,
-                sold_count  INTEGER DEFAULT 0,
-                created_at  TEXT    NOT NULL
+                sold_count   INTEGER DEFAULT 0,
+                created_at   TEXT    NOT NULL
             );
             CREATE TABLE IF NOT EXISTS orders (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         INTEGER NOT NULL,
-                username        TEXT,
-                full_name       TEXT,
-                phone           TEXT,
-                address         TEXT,
-                lat             REAL,
-                lon             REAL,
-                payment_method  TEXT,
-                book_id         TEXT    NOT NULL,
-                book_name       TEXT    NOT NULL,
-                price           INTEGER NOT NULL,
-                original_price  INTEGER NOT NULL DEFAULT 0,
-                promo_code      TEXT,
-                status          TEXT    NOT NULL DEFAULT 'yangi',
-                created_at      TEXT    NOT NULL
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        INTEGER NOT NULL,
+                username       TEXT,
+                full_name      TEXT,
+                phone          TEXT,
+                address        TEXT,
+                lat            REAL,
+                lon            REAL,
+                payment_method TEXT,
+                book_id        TEXT    NOT NULL,
+                book_name      TEXT    NOT NULL,
+                price          INTEGER NOT NULL,
+                original_price INTEGER NOT NULL DEFAULT 0,
+                promo_code     TEXT,
+                status         TEXT    NOT NULL DEFAULT 'yangi',
+                created_at     TEXT    NOT NULL,
+                quantity       INTEGER NOT NULL DEFAULT 1
             );
             CREATE TABLE IF NOT EXISTS ratings (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -452,28 +457,33 @@ async def init_db():
                 id         INTEGER PRIMARY KEY,
                 username   TEXT,
                 first_name TEXT,
-                lang       TEXT    DEFAULT 'uz',
-                joined_at  TEXT    NOT NULL
+                lang       TEXT DEFAULT 'uz',
+                joined_at  TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS feedbacks (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
                 username   TEXT,
                 full_name  TEXT,
-                message    TEXT    NOT NULL,
-                created_at TEXT    NOT NULL
+                message    TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS promo_codes (
-                code      TEXT PRIMARY KEY,
-                discount  INTEGER NOT NULL,
-                type      TEXT    NOT NULL DEFAULT 'percent',
-                uses      INTEGER NOT NULL DEFAULT 0,
-                max_uses  INTEGER NOT NULL DEFAULT 100,
-                created_at TEXT   NOT NULL
+                code       TEXT    PRIMARY KEY,
+                discount   INTEGER NOT NULL,
+                type       TEXT    NOT NULL DEFAULT 'percent',
+                uses       INTEGER NOT NULL DEFAULT 0,
+                max_uses   INTEGER NOT NULL DEFAULT 100,
+                created_at TEXT    NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+            CREATE INDEX IF NOT EXISTS idx_orders_user   ON orders(user_id);
             CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
         """)
+        # quantity ustuni mavjud emasligini tekshirib qo'shamiz (eski DB uchun)
+        try:
+            await db.execute("ALTER TABLE orders ADD COLUMN quantity INTEGER NOT NULL DEFAULT 1")
+        except Exception:
+            pass
         await db.commit()
     await asyncio.gather(load_books_from_db(), load_promos_from_db())
 
@@ -526,19 +536,24 @@ async def delete_book(bid: str):
 
 async def save_order(uid, username, full_name, phone, address,
                      payment_method, book_id, book_name, price,
-                     original_price, promo_code="", lat=None, lon=None) -> int:
+                     original_price, quantity=1, promo_code="",
+                     lat=None, lon=None) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             """INSERT INTO orders
                (user_id,username,full_name,phone,address,lat,lon,
-                payment_method,book_id,book_name,price,original_price,promo_code,status,created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                payment_method,book_id,book_name,price,original_price,
+                promo_code,status,created_at,quantity)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (uid, username, full_name, phone, address, lat, lon,
              payment_method, book_id, book_name, price,
-             original_price, promo_code, "yangi", _now()),
+             original_price, promo_code, "yangi", _now(), quantity),
         )
         oid = cur.lastrowid
-        await db.execute("UPDATE books SET sold_count=sold_count+1 WHERE id=?", (book_id,))
+        await db.execute(
+            "UPDATE books SET sold_count=sold_count+? WHERE id=?",
+            (quantity, book_id)
+        )
         await db.commit()
     return oid
 
@@ -617,6 +632,7 @@ async def start_handler(message: Message, state: FSMContext):
         f"Assalomu alaykum, <b>{name}</b>! 👋\n\n"
         "📚 <b>Kitob do'konimizga xush kelibsiz!</b>\n\n"
         "❤️ Sevimli kitoblarni Wishlistga qo'shing\n"
+        "🛒 Bir nechta kitob — savatga soling\n"
         "🎟️ Promo kod bilan chegirma oling\n"
         "⭐ Kitoblarga baho bering\n\n"
         "Quyidagi menyudan boshlang 👇",
@@ -725,10 +741,10 @@ async def wl_toggle(callback: CallbackQuery):
         WISHLISTS[uid] = set()
     if bid in WISHLISTS[uid]:
         WISHLISTS[uid].discard(bid)
-        await callback.answer("💔 Wishlistdan olib tashlandi", show_alert=False)
+        await callback.answer("💔 Wishlistdan olib tashlandi")
     else:
         WISHLISTS[uid].add(bid)
-        await callback.answer("❤️ Wishlistga qo'shildi!", show_alert=False)
+        await callback.answer("❤️ Wishlistga qo'shildi!")
     try:
         await callback.message.edit_reply_markup(
             reply_markup=book_detail_keyboard(bid, uid)
@@ -747,7 +763,8 @@ async def cart_handler(message: Message):
     if not cart:
         await message.answer(
             "🛒 <b>Savatchangiz bo'sh</b>\n\n"
-            "Kitob tanlab <b>Savatga qo'shish</b> tugmasini bosing.",
+            "Kitob tanlab <b>🛒 Savatga qo'shish</b> tugmasini bosing.\n"
+            "Bir xil kitobdan <b>bir nechta nusxa</b> qo'shishingiz mumkin!",
             parse_mode="HTML",
         )
         return
@@ -756,7 +773,7 @@ async def cart_handler(message: Message):
     for bid, qty in cart.items():
         if bid not in BOOKS:
             continue
-        b = BOOKS[bid]
+        b   = BOOKS[bid]
         sub = b["price"] * qty
         total += sub
         text += f"📖 <b>{b['name']}</b>\n   {qty} × {fmt(b['price'])} = <b>{fmt(sub)} so'm</b>\n\n"
@@ -819,7 +836,7 @@ async def view_cart_cb(callback: CallbackQuery):
     for bid, qty in cart.items():
         if bid not in BOOKS:
             continue
-        b = BOOKS[bid]
+        b   = BOOKS[bid]
         sub = b["price"] * qty
         total += sub
         text += f"📖 {b['name']} ×{qty} = <b>{fmt(sub)} so'm</b>\n"
@@ -886,7 +903,6 @@ async def book_detail_cb(callback: CallbackQuery):
     avg  = b.get("avg_rating", 0)
     cnt  = b.get("rating_count", 0)
     sold = b.get("sold_count", 0)
-    stars = "⭐" * round(avg) if avg >= 0.5 else "—"
     rating_txt = f"⭐ {avg}/5 ({cnt} baho)" if cnt else "⭐ Hali baholanmagan"
 
     caption = (
@@ -894,13 +910,15 @@ async def book_detail_cb(callback: CallbackQuery):
         f"✍️ Muallif: {b['author']}\n"
         f"💰 Narx: <b>{fmt(b['price'])} so'm</b>\n"
         f"{rating_txt} | 🛒 {sold} ta sotilgan\n\n"
-        f"📝 {b.get('description') or 'Tavsif yoq'}"
+        f"📝 {b.get('description') or 'Tavsif yo\'q'}\n\n"
+        f"➕/➖ tugmalar bilan miqdorni sozlang"
     )
     kb = book_detail_keyboard(bid, callback.from_user.id)
     try:
         if b.get("photo"):
-            await callback.message.answer_photo(photo=b["photo"], caption=caption,
-                                                reply_markup=kb, parse_mode="HTML")
+            await callback.message.answer_photo(
+                photo=b["photo"], caption=caption, reply_markup=kb, parse_mode="HTML"
+            )
         else:
             await callback.message.answer(caption, reply_markup=kb, parse_mode="HTML")
     except Exception:
@@ -941,11 +959,11 @@ async def rating_submit(callback: CallbackQuery):
 #  🎟️ PROMO KOD (Foydalanuvchi)
 # ═══════════════════════════════════════════════════
 @dp.message(F.text == "🎟️ Promo kod")
-async def promo_user_start(message: Message, state: FSMContext):
+async def promo_user_info(message: Message):
     await message.answer(
         "🎟️ <b>Promo kod</b>\n\n"
         "Promo kod orqali chegirma olishingiz mumkin.\n"
-        "Buyurtma berish vaqtida promo kod kiritish so'raladi.\n\n"
+        "Buyurtma berish jarayonida promo kod kiritish so'raladi.\n\n"
         f"Promo kod olish uchun: {ADMIN_USERNAME}",
         parse_mode="HTML",
     )
@@ -970,10 +988,19 @@ async def my_orders(message: Message):
         return
     await message.answer(f"📦 <b>Buyurtmalaringiz ({len(rows)} ta):</b>", parse_mode="HTML")
     for row in rows:
-        text = format_order_row(row)
-        if row[13]:
-            text = text.replace("━━━━━━━━━━━━━━━━\n" + "🕒",
-                                f"🎟️ Promo: {row[13]}\n━━━━━━━━━━━━━━━━\n🕒")
+        emoji = {"yangi": "🆕", "tasdiqlandi": "✅", "yuborildi": "🚚", "bekor qilindi": "❌"}.get(row[14], "📌")
+        qty = row[16] if len(row) > 16 else 1
+        promo_line = f"\n🎟️ Promo: {row[13]}" if row[13] else ""
+        qty_line   = f"\n📦 Miqdor: {qty} ta" if qty > 1 else ""
+        text = (
+            f"━━━━━━━━━━━━━━━━\n"
+            f"🧾 Buyurtma #{row[0]}\n"
+            f"📖 {row[9]}{qty_line}\n"
+            f"💰 {fmt(row[11])} so'm{promo_line}\n"
+            f"{emoji} {row[14]}\n"
+            f"🕒 {row[15]}\n"
+            f"━━━━━━━━━━━━━━━━"
+        )
         await message.answer(text)
 
 
@@ -1030,19 +1057,25 @@ async def contact_handler(message: Message):
 # ═══════════════════════════════════════════════════
 #  FSM BUYURTMA — ISM
 # ═══════════════════════════════════════════════════
-@dp.callback_query(F.data.startswith("order:"))
-async def start_order_cb(callback: CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("order_now:"))
+async def start_order_now_cb(callback: CallbackQuery, state: FSMContext):
+    """Hoziroq buyurtma — savatdagi miqdorni hisobga oladi."""
     bid = callback.data.split(":", 1)[1]
     if bid not in BOOKS:
         await callback.answer("Kitob mavjud emas.", show_alert=True)
         return
-    await state.update_data(book_id=bid, order_type="single")
+    uid  = callback.from_user.id
+    cart = get_cart(uid)
+    qty  = cart.get(bid, 1)   # Savatchadagi miqdor, aks holda 1
+    await state.update_data(book_id=bid, order_type="single", quantity=qty)
     await state.set_state(OrderState.waiting_full_name)
     b = BOOKS[bid]
+    qty_line = f"📦 Miqdor: {qty} ta\n" if qty > 1 else ""
     await callback.message.answer(
         f"📦 <b>Buyurtma berish</b>\n\n"
         f"📖 {b['name']}\n"
-        f"💰 {fmt(b['price'])} so'm\n\n"
+        f"{qty_line}"
+        f"💰 {fmt(b['price'] * qty)} so'm\n\n"
         f"1️⃣ Ism-familiyangizni yozing:",
         reply_markup=cancel_keyboard,
         parse_mode="HTML",
@@ -1082,10 +1115,11 @@ async def get_contact(message: Message, state: FSMContext):
     await state.set_state(OrderState.waiting_address)
     await message.answer(
         f"✅ Telefon: <b>{phone}</b>\n\n"
-        "3️⃣ Yetkazib berish manzilini tanlang:\n\n"
-        "📍 Tugmani bosing — Telegram qurilmangiz joylashuvini <b>avtomatik</b> aniqlaydi\n"
+        "3️⃣ <b>Yetkazib berish manzili</b>\n\n"
+        "📍 <b>Joylashuvimni yuborish</b> tugmasini bosing\n"
+        "   ➜ Telegram qurilmangizdan <b>joylashuvni yoqib</b> yuboring\n\n"
         "✍️ Yoki manzilni qo'lda yozing",
-        reply_markup=address_choose_keyboard(),
+        reply_markup=address_keyboard(),
         parse_mode="HTML",
     )
 
@@ -1093,7 +1127,7 @@ async def get_contact(message: Message, state: FSMContext):
 @dp.message(OrderState.waiting_phone, F.text == "✍️ Raqamni qo'lda yozish")
 async def phone_manual(message: Message):
     await message.answer(
-        "📱 Telefon raqamini yozing (masalan: +998901234567):",
+        "📱 Telefon raqamingizni yozing:\nMasalan: +998901234567",
         reply_markup=cancel_keyboard,
     )
 
@@ -1112,28 +1146,25 @@ async def get_phone_text(message: Message, state: FSMContext):
     await state.set_state(OrderState.waiting_address)
     await message.answer(
         f"✅ Telefon: <b>{phone}</b>\n\n"
-        "3️⃣ Yetkazib berish manzilini tanlang:\n\n"
-        "📍 Tugmani bosing — Telegram qurilmangiz joylashuvini <b>avtomatik</b> aniqlaydi\n"
+        "3️⃣ <b>Yetkazib berish manzili</b>\n\n"
+        "📍 <b>Joylashuvimni yuborish</b> tugmasini bosing\n"
+        "   ➜ Telegram qurilmangizdan <b>joylashuvni yoqib</b> yuboring\n\n"
         "✍️ Yoki manzilni qo'lda yozing",
-        reply_markup=address_choose_keyboard(),
+        reply_markup=address_keyboard(),
         parse_mode="HTML",
     )
 
 
 # ══════════════════════════════════════════════════════════════
-#  FSM — MANZIL: GPS (avtomatik, bitta tugmada)
+#  FSM — MANZIL: GPS (tugma orqali, avtomatik)
 # ══════════════════════════════════════════════════════════════
 @dp.message(OrderState.waiting_address, F.location)
 async def get_location(message: Message, state: FSMContext):
-    """
-    Foydalanuvchi 📍 Joylashuvimni yuborish tugmasini bosdi.
-    Telegram qurilmadan GPS koordinatlarini avtomatik oladi.
-    """
     lat = message.location.latitude
     lon = message.location.longitude
     maps = f"https://maps.google.com/?q={lat},{lon}"
     await state.update_data(
-        address=f"📍 GPS: {lat:.5f}, {lon:.5f}\n🔗 {maps}",
+        address=f"📍 GPS: {lat:.5f}, {lon:.5f}",
         lat=lat,
         lon=lon,
     )
@@ -1141,9 +1172,10 @@ async def get_location(message: Message, state: FSMContext):
     await message.answer(
         f"✅ <b>Joylashuv qabul qilindi!</b>\n"
         f"📍 <a href='{maps}'>Xaritada ko'rish</a>\n\n"
-        "4️⃣ 🎟️ Promo kodingiz bormi?\n"
-        "Kod yozing yoki <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
-        reply_markup=promo_keyboard(),
+        "4️⃣ 🎟️ <b>Promo kodingiz bormi?</b>\n\n"
+        "Promo kodingizni yozing.\n"
+        "Agar kod yo'q bo'lsa — <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
+        reply_markup=promo_skip_keyboard(),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
@@ -1171,23 +1203,25 @@ async def get_address_text(message: Message, state: FSMContext):
         await message.answer(
             "❌ Manzilni to'liqroq yozing.\n\n"
             "Yoki GPS orqali ulashing:",
-            reply_markup=address_choose_keyboard(),
+            reply_markup=address_keyboard(),
         )
         return
     await state.update_data(address=addr, lat=None, lon=None)
     await state.set_state(OrderState.waiting_promo)
     await message.answer(
         f"✅ Manzil: <b>{addr}</b>\n\n"
-        "4️⃣ 🎟️ Promo kodingiz bormi?\n"
-        "Kod yozing yoki <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
-        reply_markup=promo_keyboard(),
+        "4️⃣ 🎟️ <b>Promo kodingiz bormi?</b>\n\n"
+        "Promo kodingizni yozing.\n"
+        "Agar kod yo'q bo'lsa — <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
+        reply_markup=promo_skip_keyboard(),
         parse_mode="HTML",
     )
 
 
 # ═══════════════════════════════════════════════════
 #  FSM — PROMO KOD
-#  ⏭️ O'tkazib yuborish TUGMASI bilan ishlaydi
+#  ✅ FAQAT TUGMA: ⏭️ O'tkazib yuborish
+#  Matnda ham promo kod kiritish mumkin (ixtiyoriy)
 # ═══════════════════════════════════════════════════
 @dp.message(OrderState.waiting_promo)
 async def get_promo(message: Message, state: FSMContext):
@@ -1199,9 +1233,8 @@ async def get_promo(message: Message, state: FSMContext):
     promo_code = ""
     promo_desc = ""
 
-    # ⏭️ tugmasi yoki eski matn usuli — ikkalasi ham qabul qilinadi
-    skip_text = {"⏭️ O'tkazib yuborish", "o'tkazib yuborish", "otkazib yuborish", "-"}
-    if message.text.strip().lower() not in {t.lower() for t in skip_texts}:
+    # ⏭️ tugmasi bosildi — o'tkazib yuborish
+    if message.text != "⏭️ O'tkazib yuborish":
         code = message.text.strip().upper()
         data = await state.get_data()
         uid  = message.from_user.id
@@ -1209,7 +1242,8 @@ async def get_promo(message: Message, state: FSMContext):
         if data.get("order_type") == "cart":
             total = cart_total(uid)
         else:
-            total = BOOKS.get(data.get("book_id", ""), {}).get("price", 0)
+            qty   = data.get("quantity", 1)
+            total = BOOKS.get(data.get("book_id", ""), {}).get("price", 0) * qty
 
         new_total, promo_desc = apply_promo(total, code)
         if promo_desc:
@@ -1223,7 +1257,7 @@ async def get_promo(message: Message, state: FSMContext):
         else:
             await message.answer(
                 "❌ Promo kod noto'g'ri yoki muddati tugagan.\n"
-                "Davom ettiriladi...",
+                "Davom ettirilmoqda...",
             )
 
     await state.set_state(OrderState.waiting_payment)
@@ -1255,7 +1289,8 @@ async def get_payment(message: Message, state: FSMContext):
     if data.get("order_type") == "cart":
         original = cart_total(uid)
     else:
-        original = BOOKS.get(data.get("book_id", ""), {}).get("price", 0)
+        qty      = data.get("quantity", 1)
+        original = BOOKS.get(data.get("book_id", ""), {}).get("price", 0) * qty
 
     promo_code = data.get("promo_code", "")
     promo_desc = data.get("promo_desc", "")
@@ -1323,8 +1358,9 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
     final_price    = data.get("final_price", 0)
     original_price = data.get("original_price", 0)
 
-    order_ids   = []
-    book_lines  = ""
+    order_ids  = []
+    book_lines = ""
+    first_oid  = 0
 
     if order_type == "cart":
         cart  = get_cart(uid)
@@ -1333,37 +1369,36 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
             if bid not in BOOKS:
                 continue
             b = BOOKS[bid]
-            ratio     = (b["price"] * qty) / original_price if original_price else 1
+            ratio      = (b["price"] * qty) / original_price if original_price else 1
             item_price = round(final_price * ratio) if promo_code else b["price"] * qty
             book_lines += f"  📖 {b['name']} ×{qty} = {fmt(b['price']*qty)} so'm\n"
-            for _ in range(qty):
-                tasks.append(save_order(
-                    uid=uid, username=message.from_user.username,
-                    full_name=full_name, phone=phone, address=address,
-                    payment_method=pm, book_id=bid, book_name=b["name"],
-                    price=b["price"], original_price=b["price"],
-                    promo_code=promo_code, lat=lat, lon=lon,
-                ))
+            tasks.append(save_order(
+                uid=uid, username=message.from_user.username,
+                full_name=full_name, phone=phone, address=address,
+                payment_method=pm, book_id=bid, book_name=b["name"],
+                price=item_price, original_price=b["price"] * qty,
+                quantity=qty, promo_code=promo_code, lat=lat, lon=lon,
+            ))
         results   = await asyncio.gather(*tasks)
         order_ids = list(results)
         CARTS.pop(uid, None)
+        first_oid = order_ids[0] if order_ids else 0
 
-        promo_line  = f"\n🎟️ Promo: {promo_code} | Chegirma qo'llandi" if promo_code else ""
-        ids_str     = ", #".join(str(i) for i in order_ids)
-        admin_text  = (
+        promo_line = f"\n🎟️ Promo: {promo_code}" if promo_code else ""
+        ids_str    = ", #".join(str(i) for i in order_ids)
+        admin_text = (
             f"🛒 <b>Yangi savatcha buyurtma</b>\n"
             f"🧾 #{ids_str}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"👤 @{message.from_user.username or 'yoq'} (ID: {uid})\n"
-            f"🙍 {full_name}\n📞 {phone}\n🏠 {address}\n"
+            f"🙍 {full_name} | 📞 {phone}\n"
+            f"🏠 {address}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"📚 Kitoblar:\n{book_lines}"
-            f"💰 Asl narx: {fmt(original_price)} so'm\n"
-            f"💰 To'lov: <b>{fmt(final_price)} so'm</b>{promo_line}\n"
+            f"💰 Asl: {fmt(original_price)} → To'lov: <b>{fmt(final_price)} so'm</b>{promo_line}\n"
             f"💳 {pm} | {'✅ Chek bor' if has_check else '💵 Naqd'}\n"
             f"━━━━━━━━━━━━━━━━\n🕒 {_now()}"
         )
-        first_oid = order_ids[0] if order_ids else 0
         user_text = (
             f"🎉 <b>Buyurtmangiz qabul qilindi!</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
@@ -1375,29 +1410,36 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
             f"⏳ Admin tasdiqlashini kuting.\n"
             f"Savollar: {ADMIN_USERNAME}"
         )
+
     else:
-        bid   = data["book_id"]
-        b     = BOOKS[bid]
-        price = data.get("final_price", b["price"])
-        oid   = await save_order(
+        # Bitta kitob — savatchadagi miqdor bilan
+        bid      = data["book_id"]
+        b        = BOOKS[bid]
+        qty      = data.get("quantity", 1)
+        price    = data.get("final_price", b["price"] * qty)
+        orig     = b["price"] * qty
+        oid      = await save_order(
             uid=uid, username=message.from_user.username,
             full_name=full_name, phone=phone, address=address,
             payment_method=pm, book_id=bid, book_name=b["name"],
-            price=price, original_price=b["price"],
-            promo_code=promo_code, lat=lat, lon=lon,
+            price=price, original_price=orig,
+            quantity=qty, promo_code=promo_code, lat=lat, lon=lon,
         )
         order_ids = [oid]
         first_oid = oid
 
-        promo_line = f"\n🎟️ Promo: {promo_code} (chegirma qo'llandi)" if promo_code else ""
+        qty_line   = f"📦 Miqdor: {qty} ta\n" if qty > 1 else ""
+        promo_line = f"\n🎟️ Promo: {promo_code}" if promo_code else ""
         admin_text = (
             f"🛒 <b>Yangi buyurtma #{oid}</b>\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"👤 @{message.from_user.username or 'yoq'} (ID: {uid})\n"
-            f"🙍 {full_name}\n📞 {phone}\n🏠 {address}\n"
+            f"🙍 {full_name} | 📞 {phone}\n"
+            f"🏠 {address}\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"📖 <b>{b['name']}</b> — {b['author']}\n"
-            f"💰 Asl: {fmt(b['price'])} → To'lov: <b>{fmt(price)} so'm</b>{promo_line}\n"
+            f"{qty_line}"
+            f"💰 Asl: {fmt(orig)} → To'lov: <b>{fmt(price)} so'm</b>{promo_line}\n"
             f"💳 {pm} | {'✅ Chek bor' if has_check else '💵 Naqd'}\n"
             f"━━━━━━━━━━━━━━━━\n🕒 {_now()}"
         )
@@ -1406,6 +1448,7 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
             f"━━━━━━━━━━━━━━━━\n"
             f"🧾 Buyurtma #{oid}\n"
             f"📖 <b>{b['name']}</b>\n"
+            f"{qty_line}"
             f"💰 <b>{fmt(price)} so'm</b>{promo_line}\n"
             f"💳 {pm}\n"
             f"━━━━━━━━━━━━━━━━\n"
@@ -1413,6 +1456,7 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
             f"Savollar: {ADMIN_USERNAME}"
         )
 
+    # Admin ga yuborish
     await safe_send(bot.send_message(
         ADMIN_ID, admin_text,
         reply_markup=admin_order_keyboard(first_oid, uid),
@@ -1499,7 +1543,8 @@ async def add_desc(message: Message, state: FSMContext):
     await state.update_data(book_description=message.text.strip())
     await state.set_state(AddBookState.waiting_book_photo)
     await message.answer(
-        "🖼 Rasm yuboring yoki <b>o'tkazib yuborish</b> deb yozing.",
+        "🖼 Rasm yuboring yoki <b>⏭️ O'tkazib yuborish</b> tugmasini bosing:",
+        reply_markup=photo_skip_keyboard(),
         parse_mode="HTML",
     )
 
@@ -1513,8 +1558,12 @@ async def add_photo(message: Message, state: FSMContext):
     photo = None
     if message.photo:
         photo = message.photo[-1].file_id
-    elif message.text and message.text.lower() != "o'tkazib yuborish":
+    elif message.text == "⏭️ O'tkazib yuborish":
+        photo = None   # rasm yo'q
+    else:
+        # Boshqa matn — URL sifatida saqlanadi
         photo = message.text.strip()
+
     data = await state.get_data()
     bid  = generate_book_id(data["book_name"])
     await save_book(bid, data["book_name"], data["book_author"],
@@ -1546,7 +1595,7 @@ async def admin_books(message: Message):
     await message.answer(text, parse_mode="HTML")
     for bid, b in BOOKS.items():
         await message.answer(
-            f"📖 {b['name']} | {fmt(b['price'])} so'm | Sotilgan: {b['sold_count']}",
+            f"📖 {b['name']} | {fmt(b['price'])} so'm | Sotilgan: {b['sold_count']} ta",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
                 InlineKeyboardButton(text="🗑️ O'chirish", callback_data=f"delete_book:{bid}")
             ]]),
@@ -1595,12 +1644,14 @@ async def admin_panel(message: Message):
                 row = await cur.fetchone()
                 results.append(row[0])
         async with db.execute(
-            "SELECT book_name,COUNT(*) as c FROM orders GROUP BY book_id ORDER BY c DESC LIMIT 3"
+            "SELECT book_name, SUM(quantity) as total FROM orders GROUP BY book_id ORDER BY total DESC LIMIT 3"
         ) as cur:
             top = await cur.fetchall()
 
     total, new_c, conf, sent, cancel, revenue, users, feedbacks, promos = results
-    top_text = "\n".join(f"  {i+1}. {r[0]} — {r[1]} ta" for i, r in enumerate(top)) if top else "  Ma'lumot yo'q"
+    top_text = "\n".join(
+        f"  {i+1}. {r[0]} — {r[1]} ta" for i, r in enumerate(top)
+    ) if top else "  Ma'lumot yo'q"
 
     await message.answer(
         f"📊 <b>Admin Panel</b>\n"
@@ -1619,7 +1670,8 @@ async def admin_panel(message: Message):
         f"━━━━━━━━━━━━━━━━\n"
         f"🏆 <b>TOP 3 kitob:</b>\n{top_text}\n"
         f"━━━━━━━━━━━━━━━━\n"
-        f"📋 Buyurtmalar: /orders",
+        f"📋 Buyurtmalar: /orders\n"
+        f"📤 Barcha foydalanuvchilarga: 📣 Xabar yuborish",
         parse_mode="HTML",
     )
 
@@ -1642,15 +1694,21 @@ async def admin_orders(message: Message):
         maps_link = ""
         if row[6] and row[7]:
             maps_link = f"\n🗺 <a href='https://maps.google.com/?q={row[6]},{row[7]}'>Xaritada ko'rish</a>"
+        qty = row[16] if len(row) > 16 else 1
+        qty_line = f" ×{qty}" if qty > 1 else ""
         text = (
             f"🧾 <b>#{row[0]}</b> | @{row[2] or 'yoq'} ({row[1]})\n"
             f"🙍 {row[3]} | 📞 {row[4]}\n"
             f"🏠 {row[5]}{maps_link}\n"
-            f"📖 {row[9]} | 💰 {fmt(row[11])} so'm\n"
+            f"📖 {row[9]}{qty_line} | 💰 {fmt(row[11])} so'm\n"
             f"💳 {row[8]} | 📌 {row[14]}\n"
             f"🕒 {row[15]}"
         )
-        await message.answer(text, reply_markup=admin_order_keyboard(row[0], row[1]), parse_mode="HTML")
+        await message.answer(
+            text,
+            reply_markup=admin_order_keyboard(row[0], row[1]),
+            parse_mode="HTML"
+        )
 
 
 # ═══════════════════════════════════════════════════
@@ -1680,7 +1738,7 @@ async def broadcast_send(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Bekor.", reply_markup=get_main_menu(message.from_user.id))
         return
-    user_ids = await get_all_user_ids()
+    user_ids   = await get_all_user_ids()
     sent = failed = 0
     status_msg = await message.answer(f"⏳ 0/{len(user_ids)} yuborilmoqda...")
 
@@ -1742,10 +1800,7 @@ async def promo_code_input(message: Message, state: FSMContext):
         return
     await state.update_data(promo_code=code)
     await state.set_state(PromoState.waiting_type)
-    await message.answer(
-        "Chegirma turini tanlang:",
-        reply_markup=promo_type_keyboard(),
-    )
+    await message.answer("Chegirma turini tanlang:", reply_markup=promo_type_keyboard())
 
 
 @dp.message(PromoState.waiting_type)
@@ -1872,7 +1927,7 @@ async def admin_sent(callback: CallbackQuery):
 
 
 @dp.callback_query(F.data.startswith("admin_cancel:"))
-async def admin_cancel(callback: CallbackQuery):
+async def admin_cancel_cb(callback: CallbackQuery):
     await _admin_status_action(
         callback, "bekor qilindi", "❌ BEKOR QILINDI",
         "❌ <b>Buyurtmangiz bekor qilindi.</b>\nMurojaat uchun:",
@@ -1897,8 +1952,8 @@ async def fallback(message: Message, state: FSMContext):
 # ═══════════════════════════════════════════════════
 async def main():
     await init_db()
-    logger.info("✅ Bot v3.2 ishga tushdi!")
-    print("✅ Bot v3.2 ishga tushdi! Ctrl+C bosib to'xtating.")
+    logger.info("✅ Bot v4.0 ishga tushdi!")
+    print("✅ Bot v4.0 ishga tushdi! Ctrl+C bosib to'xtating.")
     await dp.start_polling(
         bot,
         allowed_updates=dp.resolve_used_update_types(),
