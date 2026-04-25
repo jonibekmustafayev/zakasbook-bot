@@ -1,8 +1,9 @@
 """
 ╔══════════════════════════════════════════════════════════╗
-║           KITOB DO'KONI TELEGRAM BOT  v3.0              ║
+║           KITOB DO'KONI TELEGRAM BOT  v3.1              ║
 ║  Parallel foydalanuvchilar, anti-flood, wishlist,        ║
 ║  promo kod, buyurtma kuzatuv, karta egasi ismi va boshq. ║
+║  + Joylashuv ruxsati oqimi (v3.1)                       ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -54,26 +55,25 @@ ADMIN_USERNAME = "@admoyin_lvl"
 ADMIN_PHONE  = "+998931407381"
 
 # ── To'lov rekvizitlari ──────────────────────────────
-CARD_HOLDER  = "Mustafayev Jonibek"          # Karta egasining ismi
+CARD_HOLDER  = "Mustafayev Jonibek"
 HUMO_CARD    = "9860 1701 3065 6763"
 VISA_CARD    = "4023 0602 0575 2529"
 
 # ── Anti-flood sozlamalari ───────────────────────────
-FLOOD_LIMIT      = 5          # N ta xabar
-FLOOD_INTERVAL   = 3          # N soniya ichida
-FLOOD_BLOCK_TIME = 30         # Blok muddati (soniya)
+FLOOD_LIMIT      = 5
+FLOOD_INTERVAL   = 3
+FLOOD_BLOCK_TIME = 30
 
 # ═══════════════════════════════════════════════════
 #  GLOBAL MA'LUMOTLAR
 # ═══════════════════════════════════════════════════
 BOOKS: dict  = {}
-CARTS: dict  = {}            # {user_id: {book_id: qty}}
-WISHLISTS: dict = {}         # {user_id: set(book_id)}
-PROMO_CODES: dict = {}       # {code: {"discount": 10, "type": "percent"|"fixed", "uses": 0, "max_uses": 100}}
+CARTS: dict  = {}
+WISHLISTS: dict = {}
+PROMO_CODES: dict = {}
 
-# Anti-flood tracking
-_flood_tracker: dict = defaultdict(list)   # {user_id: [timestamp, ...]}
-_blocked_users: dict = {}                  # {user_id: unblock_time}
+_flood_tracker: dict = defaultdict(list)
+_blocked_users: dict = {}
 
 # ═══════════════════════════════════════════════════
 #  FSM HOLATLAR
@@ -82,6 +82,8 @@ class OrderState(StatesGroup):
     waiting_full_name  = State()
     waiting_phone      = State()
     waiting_address    = State()
+    # ↓ YANGI: joylashuv ruxsati so'raldi, tugma bosilishini kutmoqda
+    waiting_location_permission = State()
     waiting_promo      = State()
     waiting_payment    = State()
     waiting_check      = State()
@@ -116,8 +118,6 @@ class PromoState(StatesGroup):
 #  ANTI-FLOOD MIDDLEWARE
 # ═══════════════════════════════════════════════════
 class AntiFloodMiddleware(BaseMiddleware):
-    """Parallel foydalanuvchilar uchun flood himoyasi"""
-
     async def __call__(self, handler, event: TelegramObject, data: dict):
         user = None
         if isinstance(event, Message):
@@ -129,7 +129,6 @@ class AntiFloodMiddleware(BaseMiddleware):
             uid = user.id
             now = datetime.now().timestamp()
 
-            # Bloklanganmi?
             if uid in _blocked_users:
                 if now < _blocked_users[uid]:
                     remaining = int(_blocked_users[uid] - now)
@@ -145,7 +144,6 @@ class AntiFloodMiddleware(BaseMiddleware):
                 else:
                     del _blocked_users[uid]
 
-            # Flood hisoblash
             _flood_tracker[uid] = [t for t in _flood_tracker[uid] if now - t < FLOOD_INTERVAL]
             _flood_tracker[uid].append(now)
 
@@ -163,10 +161,9 @@ class AntiFloodMiddleware(BaseMiddleware):
 
 
 # ═══════════════════════════════════════════════════
-#  SAFE SENDER — TelegramRetryAfter ni ushlaydi
+#  SAFE SENDER
 # ═══════════════════════════════════════════════════
 async def safe_send(coro, retries: int = 3):
-    """Telegram rate-limit xatolarini avtomatik qayta urinib yuboradi"""
     for attempt in range(retries):
         try:
             return await coro
@@ -193,7 +190,6 @@ storage = MemoryStorage()
 bot = Bot(token=TOKEN)
 dp  = Dispatcher(storage=storage)
 
-# Middleware ro'yxatga olish
 dp.message.middleware(AntiFloodMiddleware())
 dp.callback_query.middleware(AntiFloodMiddleware())
 
@@ -222,7 +218,6 @@ def get_wishlist(uid: int) -> set:
     return WISHLISTS.get(uid, set())
 
 def apply_promo(total: int, code: str) -> tuple[int, str]:
-    """Promo kodni qo'llash. (yangi_narx, tavsif) qaytaradi"""
     code = code.strip().upper()
     if code not in PROMO_CODES:
         return total, ""
@@ -287,9 +282,27 @@ def phone_keyboard() -> ReplyKeyboardMarkup:
         [KeyboardButton(text="❌ Bekor qilish")],
     ], resize_keyboard=True, one_time_keyboard=True)
 
-def address_keyboard() -> ReplyKeyboardMarkup:
+# ════════════════════════════════════════════════════
+#  YANGI: Manzil tanlash klaviaturasi (location YO'Q)
+# ════════════════════════════════════════════════════
+def address_choose_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Birinchi qadam: foydalanuvchi GPS yoki qo'lda yozishni tanlaydi.
+    GPS tugmasi hali location so'RAMAYDI — avval ruxsat oqimi ishga tushadi.
+    """
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📍 GPS joylashuvimni ulashish", request_location=True)],
+        [KeyboardButton(text="📍 GPS joylashuvimni ulashish")],   # ← request_location YO'Q
+        [KeyboardButton(text="✍️ Manzilni qo'lda yozish")],
+        [KeyboardButton(text="❌ Bekor qilish")],
+    ], resize_keyboard=True, one_time_keyboard=True)
+
+def location_permission_keyboard() -> ReplyKeyboardMarkup:
+    """
+    Ikkinchi qadam: foydalanuvchi joylashuvni yoqib, REAL tugmani bosadi.
+    Bu yerda request_location=True ishlatiladi.
+    """
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="📡 Joylashuvni yuborish", request_location=True)],
         [KeyboardButton(text="✍️ Manzilni qo'lda yozish")],
         [KeyboardButton(text="❌ Bekor qilish")],
     ], resize_keyboard=True, one_time_keyboard=True)
@@ -334,7 +347,6 @@ def book_detail_keyboard(bid: str, uid: int) -> InlineKeyboardMarkup:
     qty  = cart.get(bid, 0)
     wl   = get_wishlist(uid)
     rows = []
-    # Savat
     if qty > 0:
         rows.append([
             InlineKeyboardButton(text="➖", callback_data=f"cart_remove:{bid}"),
@@ -345,10 +357,8 @@ def book_detail_keyboard(bid: str, uid: int) -> InlineKeyboardMarkup:
     else:
         rows.append([InlineKeyboardButton(text="🛒 Savatga qo'shish", callback_data=f"cart_add:{bid}")])
         rows.append([InlineKeyboardButton(text="⚡ Hoziroq buyurtma",  callback_data=f"order:{bid}")])
-    # Wishlist
     wl_text = "💔 Wishlistdan chiqarish" if bid in wl else "❤️ Wishlistga qo'shish"
     rows.append([InlineKeyboardButton(text=wl_text, callback_data=f"wl_toggle:{bid}")])
-    # Reyting
     rows.append([InlineKeyboardButton(text="⭐ Baholash", callback_data=f"rate:{bid}")])
     rows.append([InlineKeyboardButton(text="⬅️ Orqaga",  callback_data="back:books")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -529,7 +539,6 @@ async def save_order(uid, username, full_name, phone, address,
              original_price, promo_code, "yangi", _now()),
         )
         oid = cur.lastrowid
-        # sotilganlar sonini oshirish
         await db.execute("UPDATE books SET sold_count=sold_count+1 WHERE id=?", (book_id,))
         await db.commit()
     return oid
@@ -934,7 +943,6 @@ async def rating_submit(callback: CallbackQuery):
 # ═══════════════════════════════════════════════════
 @dp.message(F.text == "🎟️ Promo kod")
 async def promo_user_start(message: Message, state: FSMContext):
-    # Promo kodni buyurtma jarayonida kiritish
     await message.answer(
         "🎟️ <b>Promo kod</b>\n\n"
         "Promo kod orqali chegirma olishingiz mumkin.\n"
@@ -964,7 +972,7 @@ async def my_orders(message: Message):
     await message.answer(f"📦 <b>Buyurtmalaringiz ({len(rows)} ta):</b>", parse_mode="HTML")
     for row in rows:
         text = format_order_row(row)
-        if row[13]:  # promo_code
+        if row[13]:
             text = text.replace("━━━━━━━━━━━━━━━━\n" + "🕒",
                                 f"🎟️ Promo: {row[13]}\n━━━━━━━━━━━━━━━━\n🕒")
         await message.answer(text)
@@ -1064,7 +1072,7 @@ async def get_full_name(message: Message, state: FSMContext):
 
 
 # ═══════════════════════════════════════════════════
-#  FSM — TELEFON (kontakt yoki qo'lda)
+#  FSM — TELEFON
 # ═══════════════════════════════════════════════════
 @dp.message(OrderState.waiting_phone, F.contact)
 async def get_contact(message: Message, state: FSMContext):
@@ -1076,7 +1084,7 @@ async def get_contact(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Telefon: <b>{phone}</b>\n\n"
         "3️⃣ Yetkazib berish manzilini tanlang:",
-        reply_markup=address_keyboard(),
+        reply_markup=address_choose_keyboard(),   # ← yangi klaviatura
         parse_mode="HTML",
     )
 
@@ -1104,16 +1112,38 @@ async def get_phone_text(message: Message, state: FSMContext):
     await message.answer(
         f"✅ Telefon: <b>{phone}</b>\n\n"
         "3️⃣ Yetkazib berish manzilini tanlang:",
-        reply_markup=address_keyboard(),
+        reply_markup=address_choose_keyboard(),   # ← yangi klaviatura
         parse_mode="HTML",
     )
 
 
-# ═══════════════════════════════════════════════════
-#  FSM — MANZIL (GPS yoki qo'lda)
-# ═══════════════════════════════════════════════════
-@dp.message(OrderState.waiting_address, F.location)
-async def get_location(message: Message, state: FSMContext):
+# ══════════════════════════════════════════════════════════════
+#  FSM — MANZIL: BIRINCHI QADAM (foydalanuvchi GPS/qo'lda tanlaydi)
+# ══════════════════════════════════════════════════════════════
+@dp.message(OrderState.waiting_address, F.text == "📍 GPS joylashuvimni ulashish")
+async def address_gps_chosen(message: Message, state: FSMContext):
+    """
+    Foydalanuvchi GPS tugmasini bosdi.
+    Endi unga Telegram'da joylashuvni YOQISH va YUBORISH ko'rsatmasi beriladi.
+    request_location=True bo'lgan YANGI tugma chiqadi.
+    """
+    await state.set_state(OrderState.waiting_location_permission)
+    await message.answer(
+        "📍 <b>Joylashuvni yoqing va yuboring</b>\n\n"
+        "Quyidagi yo'riqnomani bajaring:\n\n"
+        "1️⃣ <b>Telegram Sozlamalar</b> → <b>Maxfiylik</b> → <b>Joylashuv</b>\n"
+        "   — yoki —\n"
+        "   Telefon <b>Sozlamalar</b> → <b>Ilovalar</b> → <b>Telegram</b> → <b>Joylashuv: Faqat ilovadan foydalanayotganda</b>\n\n"
+        "2️⃣ Ruxsat berganingizdan so'ng quyidagi\n"
+        "   <b>📡 Joylashuvni yuborish</b> tugmasini bosing 👇",
+        reply_markup=location_permission_keyboard(),   # ← request_location=True bu yerda
+        parse_mode="HTML",
+    )
+
+
+@dp.message(OrderState.waiting_location_permission, F.location)
+async def get_location_after_permission(message: Message, state: FSMContext):
+    """Foydalanuvchi ruxsat berib lokatsiyani yubordi."""
     lat = message.location.latitude
     lon = message.location.longitude
     maps = f"https://maps.google.com/?q={lat},{lon}"
@@ -1123,7 +1153,7 @@ async def get_location(message: Message, state: FSMContext):
     )
     await state.set_state(OrderState.waiting_promo)
     await message.answer(
-        f"✅ Joylashuv qabul qilindi!\n"
+        f"✅ <b>Joylashuv qabul qilindi!</b>\n"
         f"📍 <a href='{maps}'>Xaritada ko'rish</a>\n\n"
         "4️⃣ 🎟️ Promo kodingiz bormi?\n"
         "Kod yozing yoki <b>O'tkazib yuborish</b> deb yozing:",
@@ -1133,6 +1163,37 @@ async def get_location(message: Message, state: FSMContext):
     )
 
 
+@dp.message(OrderState.waiting_location_permission, F.text == "✍️ Manzilni qo'lda yozish")
+async def address_manual_from_permission(message: Message, state: FSMContext):
+    """Ruxsat ekranida 'qo'lda yozish' tugmasini bosdi."""
+    await state.set_state(OrderState.waiting_address)
+    await message.answer(
+        "🏠 Shahar, tuman, ko'cha, uy raqamini yozing:",
+        reply_markup=cancel_keyboard,
+    )
+
+
+@dp.message(OrderState.waiting_location_permission, F.text == "❌ Bekor qilish")
+async def cancel_from_permission(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Bekor qilindi.", reply_markup=get_main_menu(message.from_user.id))
+
+
+@dp.message(OrderState.waiting_location_permission)
+async def location_permission_fallback(message: Message, state: FSMContext):
+    """Foydalanuvchi boshqa narsa yubordi — eslatma ber."""
+    await message.answer(
+        "⚠️ Iltimos, joylashuvingizni yuboring yoki manzilni qo'lda yozing.\n\n"
+        "Joylashuv ruxsatini berganingizdan so'ng\n"
+        "<b>📡 Joylashuvni yuborish</b> tugmasini bosing 👇",
+        reply_markup=location_permission_keyboard(),
+        parse_mode="HTML",
+    )
+
+
+# ══════════════════════════════════════════════════════════════
+#  FSM — MANZIL: QO'LDA YOZISH (waiting_address holati)
+# ══════════════════════════════════════════════════════════════
 @dp.message(OrderState.waiting_address, F.text == "✍️ Manzilni qo'lda yozish")
 async def address_manual(message: Message):
     await message.answer(
@@ -1149,7 +1210,11 @@ async def get_address_text(message: Message, state: FSMContext):
         return
     addr = message.text.strip()
     if len(addr) < 5:
-        await message.answer("❌ Manzilni to'liqroq yozing.")
+        await message.answer(
+            "❌ Manzilni to'liqroq yozing.\n\n"
+            "Yoki GPS orqali ulashing:",
+            reply_markup=address_choose_keyboard(),
+        )
         return
     await state.update_data(address=addr, lat=None, lon=None)
     await state.set_state(OrderState.waiting_promo)
@@ -1180,7 +1245,6 @@ async def get_promo(message: Message, state: FSMContext):
         data = await state.get_data()
         uid  = message.from_user.id
 
-        # Jami narxni hisoblash
         if data.get("order_type") == "cart":
             total = cart_total(uid)
         else:
@@ -1227,7 +1291,6 @@ async def get_payment(message: Message, state: FSMContext):
     data = await state.get_data()
     uid  = message.from_user.id
 
-    # Narxni hisoblash (promo bilan)
     if data.get("order_type") == "cart":
         original = cart_total(uid)
     else:
@@ -1309,7 +1372,6 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
             if bid not in BOOKS:
                 continue
             b = BOOKS[bid]
-            # Promo ulushi har kitobga proportsional
             ratio     = (b["price"] * qty) / original_price if original_price else 1
             item_price = round(final_price * ratio) if promo_code else b["price"] * qty
             book_lines += f"  📖 {b['name']} ×{qty} = {fmt(b['price']*qty)} so'm\n"
@@ -1390,14 +1452,12 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
             f"Savollar: {ADMIN_USERNAME}"
         )
 
-    # Admin ga yuborish
     await safe_send(bot.send_message(
         ADMIN_ID, admin_text,
         reply_markup=admin_order_keyboard(first_oid, uid),
         parse_mode="HTML",
     ))
 
-    # Chek
     if has_check:
         if message.photo:
             await safe_send(bot.send_photo(
@@ -1410,7 +1470,6 @@ async def complete_order(message: Message, state: FSMContext, has_check: bool = 
                 caption=f"🧾 Buyurtma #{first_oid} — To'lov cheki",
             ))
 
-    # GPS lokatsiyasini adminga yuborish
     if lat and lon:
         await safe_send(bot.send_location(ADMIN_ID, latitude=lat, longitude=lon))
 
@@ -1557,7 +1616,6 @@ async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("❌ Faqat admin uchun.")
         return
-    # Parallel DB so'rovlar — tezroq
     async with aiosqlite.connect(DB_PATH) as db:
         queries = [
             "SELECT COUNT(*) FROM orders",
@@ -1575,7 +1633,6 @@ async def admin_panel(message: Message):
             async with db.execute(q) as cur:
                 row = await cur.fetchone()
                 results.append(row[0])
-        # TOP 3 kitob
         async with db.execute(
             "SELECT book_name,COUNT(*) as c FROM orders GROUP BY book_id ORDER BY c DESC LIMIT 3"
         ) as cur:
@@ -1622,7 +1679,7 @@ async def admin_orders(message: Message):
     await message.answer(f"📋 <b>So'nggi {len(rows)} ta:</b>", parse_mode="HTML")
     for row in rows:
         maps_link = ""
-        if row[6] and row[7]:  # lat, lon
+        if row[6] and row[7]:
             maps_link = f"\n🗺 <a href='https://maps.google.com/?q={row[6]},{row[7]}'>Xaritada ko'rish</a>"
         text = (
             f"🧾 <b>#{row[0]}</b> | @{row[2] or 'yoq'} ({row[1]})\n"
@@ -1682,7 +1739,7 @@ async def broadcast_send(message: Message, state: FSMContext):
                 await status_msg.edit_text(f"⏳ {i+1}/{len(user_ids)} yuborildi...")
             except Exception:
                 pass
-        await asyncio.sleep(0.04)   # ~25 msg/s — Telegram limitidan past
+        await asyncio.sleep(0.04)
 
     await state.clear()
     try:
@@ -1879,12 +1936,12 @@ async def fallback(message: Message, state: FSMContext):
 # ═══════════════════════════════════════════════════
 async def main():
     await init_db()
-    logger.info("✅ Bot v3.0 ishga tushdi!")
-    print("✅ Bot v3.0 ishga tushdi! Ctrl+C bosib to'xtating.")
+    logger.info("✅ Bot v3.1 ishga tushdi!")
+    print("✅ Bot v3.1 ishga tushdi! Ctrl+C bosib to'xtating.")
     await dp.start_polling(
         bot,
         allowed_updates=dp.resolve_used_update_types(),
-        drop_pending_updates=True,   # Eskilarni o'tkazib yuborish
+        drop_pending_updates=True,
     )
 
 
