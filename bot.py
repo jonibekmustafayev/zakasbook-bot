@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════
 #  SOZLAMALAR
 # ═══════════════════════════════════════════════════
-TOKEN          = "8574924900:AAHou0j8Rz0vm2xrmGTxkBZ8jQD5czoZmZM"
+TOKEN          = "8574924900:AAGVi7_Yd0nm5P_25w2S__p_PaczMlb2a2I"
 ADMIN_ID       = 6722242402
 ADMIN_USERNAME = "@admoyin_lvl"
 ADMIN_PHONE    = "+998931407381"
