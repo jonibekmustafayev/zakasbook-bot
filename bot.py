@@ -1961,9 +1961,7 @@ async def main():
     )
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
-    from threading import Thread
+from threading import Thread
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 class Handler(BaseHTTPRequestHandler):
