@@ -1961,18 +1961,31 @@ async def main():
     )
 
 
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+from aiohttp import web
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'OK')
-    def log_message(self, format, *args):
-        pass
+# ... (sizning mavjud kodlaringiz)
 
-def run():
-    HTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
+async def on_startup(bot: Bot):
+    # Webhook manzilini o'rnatish (Render manzilini yozing)
+    await bot.set_webhook(f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}/webhook")
 
-Thread(target=run, daemon=True).start()
+def main():
+    # Render portni avtomatik beradi
+    port = int(os.environ.get("PORT", 8080))
+    
+    # Webhook serverini sozlash
+    app = web.Application()
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+    setup_application(app, dp, bot=bot)
+    
+    # Serverni ishga tushirish
+    web.run_app(app, host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    main()
